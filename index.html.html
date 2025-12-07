@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Mensajes — Copiar al portapapeles</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--muted:#94a3b8;--glass:rgba(255,255,255,0.04)}
+    *{box-sizing:border-box}
+    body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial,sans-serif;background:linear-gradient(180deg,#071028 0%, #071827 100%);color:#e6eef6;margin:0;padding:24px}
+    .container{max-width:900px;margin:0 auto}
+    h1{font-size:20px;margin:0 0 12px}
+    .card{background:var(--card);border-radius:12px;padding:16px;box-shadow:0 6px 18px rgba(2,6,23,0.6);}
+    textarea{width:100%;min-height:84px;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--glass);color:inherit;resize:vertical}
+    .row{display:flex;gap:8px;align-items:center}
+    .btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px 12px;border-radius:8px;cursor:pointer}
+    .btn.primary{background:linear-gradient(90deg,var(--accent),#7c3aed);border:0;color:#021223}
+    .list{margin-top:12px;display:grid;gap:8px}
+    .item{display:flex;gap:8px;align-items:flex-start;padding:10px;border-radius:8px;background:linear-gradient(180deg,rgba(255,255,255,0.01),rgba(255,255,255,0.00));border:1px solid rgba(255,255,255,0.02)}
+    .msg{flex:1;white-space:pre-wrap;font-size:14px;color:#e6eef6}
+    .actions{display:flex;flex-direction:column;gap:6px}
+    .small{font-size:12px;color:var(--muted)}
+    .toast{position:fixed;right:20px;bottom:20px;background:#081226;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 8px 30px rgba(2,6,23,0.6);opacity:0;transform:translateY(8px);transition:all .28s}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+    .count{margin-left:auto;color:var(--muted);font-size:13px}
+    .search{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    @media (max-width:600px){.row{flex-direction:column}.actions{flex-direction:row}}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Gestor de mensajes — Copiar al portapapeles</h1>
+    <div class="card">
+      <div style="display:flex;gap:12px;align-items:flex-start">
+        <div style="flex:1">
+          <label class="small">Nuevo mensaje</label>
+          <textarea id="inputMsg" placeholder="Escribe o pega un mensaje aquí..."></textarea>
+          <div class="controls">
+            <button class="btn primary" id="addBtn">Agregar mensaje</button>
+            <button class="btn" id="pasteBtn">Pegar desde portapapeles</button>
+            <button class="btn" id="copyAllBtn">Copiar todo</button>
+            <input id="filter" class="search" placeholder="Filtrar mensajes" />
+            <div class="count" id="count">0 mensajes</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="list" id="list"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">Copiado al portapapeles</div>
+
+  <script>
+    // Manejo de mensajes en localStorage
+    const LS_KEY = 'copymessages_v1'
+    let messages = JSON.parse(localStorage.getItem(LS_KEY) || '[]')
+
+    const input = document.getElementById('inputMsg')
+    const addBtn = document.getElementById('addBtn')
+    const listEl = document.getElementById('list')
+    const toast = document.getElementById('toast')
+    const pasteBtn = document.getElementById('pasteBtn')
+    const copyAllBtn = document.getElementById('copyAllBtn')
+    const filterInput = document.getElementById('filter')
+    const countEl = document.getElementById('count')
+
+    function save(){ localStorage.setItem(LS_KEY, JSON.stringify(messages)) }
+
+    function showToast(text='Copiado al portapapeles'){
+      toast.textContent = text
+      toast.classList.add('show')
+      clearTimeout(toast._t)
+      toast._t = setTimeout(()=>toast.classList.remove('show'), 1500)
+    }
+
+    function render(){
+      const q = (filterInput.value || '').toLowerCase()
+      listEl.innerHTML = ''
+      const filtered = messages.filter(m => m.text.toLowerCase().includes(q))
+      filtered.forEach((m,i) => {
+        const idx = messages.indexOf(m)
+        const item = document.createElement('div')
+        item.className = 'item'
+        const msg = document.createElement('div')
+        msg.className = 'msg'
+        msg.textContent = m.text
+        const actions = document.createElement('div')
+        actions.className = 'actions'
+
+        const copyBtn = document.createElement('button')
+        copyBtn.className = 'btn'
+        copyBtn.textContent = 'Copiar'
+        copyBtn.title = 'Copiar al portapapeles'
+        copyBtn.onclick = () => copyMessage(idx)
+
+        const editBtn = document.createElement('button')
+        editBtn.className = 'btn'
+        editBtn.textContent = 'Editar'
+        editBtn.onclick = () => startEdit(idx)
+
+        const delBtn = document.createElement('button')
+        delBtn.className = 'btn'
+        delBtn.textContent = 'Eliminar'
+        delBtn.onclick = () => { if(confirm('Eliminar este mensaje?')){ messages.splice(idx,1); save(); render() } }
+
+        actions.appendChild(copyBtn)
+        actions.appendChild(editBtn)
+        actions.appendChild(delBtn)
+
+        item.appendChild(msg)
+        item.appendChild(actions)
+        listEl.appendChild(item)
+      })
+
+      countEl.textContent = messages.length + (messages.length === 1 ? ' mensaje' : ' mensajes')
+    }
+
+    function addMessage(){
+      const text = input.value.trim()
+      if(!text) return showToast('Nada para agregar')
+      messages.unshift({text,created:Date.now()})
+      save()
+      input.value = ''
+      render()
+      showToast('Mensaje agregado')
+    }
+
+    function copyMessage(idx){
+      const text = messages[idx]?.text
+      if(!text) return showToast('Mensaje no encontrado')
+      navigator.clipboard.writeText(text).then(()=>{
+        showToast('Copiado al portapapeles')
+      }).catch(err=>{
+        // Fallback: seleccionar y ejecutar execCommand
+        fallbackCopy(text)
+      })
+    }
+
+    function fallbackCopy(text){
+      const ta = document.createElement('textarea')
+      ta.value = text
+      document.body.appendChild(ta)
+      ta.select()
+      try{ document.execCommand('copy'); showToast('Copiado (fallback)') }catch(e){ showToast('No se pudo copiar') }
+      ta.remove()
+    }
+
+    function startEdit(idx){
+      const newText = prompt('Editar mensaje:', messages[idx].text)
+      if(newText === null) return
+      messages[idx].text = newText
+      save()
+      render()
+      showToast('Mensaje actualizado')
+    }
+
+    filterInput.addEventListener('input', render)
+    addBtn.addEventListener('click', addMessage)
+    input.addEventListener('keydown', e=>{ if(e.key === 'Enter' && (e.ctrlKey || e.metaKey)) addMessage() })
+
+    pasteBtn.addEventListener('click', async ()=>{
+      try{
+        const text = await navigator.clipboard.readText()
+        if(text) { input.value = text; showToast('Pegado desde portapapeles') }
+        else showToast('Portapapeles vacío')
+      }catch(e){ showToast('Permiso denegado o no soportado') }
+    })
+
+    copyAllBtn.addEventListener('click', ()=>{
+      if(messages.length === 0) return showToast('No hay mensajes')
+      const joined = messages.map(m=>m.text).join('\n\n')
+      navigator.clipboard.writeText(joined).then(()=>showToast('Todos los mensajes copiados')).catch(()=>{ fallbackCopy(joined) })
+    })
+
+    // Atajos: Ctrl/Cmd+Shift+V para pegar en el textarea desde el portapapeles
+    window.addEventListener('keydown', async (e)=>{
+      if((e.ctrlKey||e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'v'){
+        e.preventDefault();
+        try{ const t = await navigator.clipboard.readText(); input.value = t; showToast('Pegado desde portapapeles') }catch(e){ showToast('No se pudo pegar') }
+      }
+    })
+
+    // Inicializar
+    render()
+  </script>
+</body>
+</html>
